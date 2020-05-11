@@ -59,6 +59,48 @@ define Build/nec-fw
   mv $@.new $@
 endef
 
+define Build/pisen_wmb001n-factory
+  -[ -f "$@" ] && \
+  mkdir -p "$@.tmp" && \
+  cp "$(KDIR)/loader-$(word 1,$(1)).uImage" "$@.tmp/uImage" && \
+  mv "$@" "$@.tmp/rootfs" && \
+  cp "bin/pisen_wmb001n_factory-header.bin" "$@" && \
+  $(TAR) -cp --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name \
+    $(if $(SOURCE_DATE_EPOCH),--mtime="@$(SOURCE_DATE_EPOCH)") \
+    -C "$@.tmp" . | gzip -9n >> "$@" && \
+  rm -rf "$@.tmp"
+endef
+
+define Build/teltonika-fw-fake-checksum
+	# Teltonika U-Boot web based firmware upgrade/recovery routine compares
+	# 16 bytes from md5sum1[16] field in TP-Link v1 header (offset: 76 bytes
+	# from begin of the firmware file) with 16 bytes stored just before
+	# 0xdeadc0de marker. Values are only compared, MD5 sum is not verified.
+	let \
+		offs="$$(stat -c%s $@) - 20"; \
+		dd if=$@ bs=1 count=16 skip=76 |\
+		dd of=$@ bs=1 count=16 seek=$$offs conv=notrunc
+endef
+
+define Build/wrgg-pad-rootfs
+	$(STAGING_DIR_HOST)/bin/padjffs2 $(IMAGE_ROOTFS) -c 64 >>$@
+endef
+
+define Build/engenius_ens202ext-factory
+	-[ -f "$@" ] && \
+	mkdir -p $@.tmp && \
+	echo '#!/bin/sh' > $@.tmp/before-upgrade.sh && \
+	echo ': > /tmp/_sys/sysupgrade.tgz' >> $@.tmp/before-upgrade.sh && \
+	$(CP) $(KDIR)/loader-ens202ext.uImage \
+		$@.tmp/openwrt-senao-ens202ext-uImage-lzma.bin && \
+	$(CP) $@ $@.tmp/openwrt-senao-ens202ext-root.squashfs && \
+	$(TAR) -cp --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name \
+		$(if $(SOURCE_DATE_EPOCH),--mtime="@$(SOURCE_DATE_EPOCH)") \
+		-C $@.tmp . > $@ && \
+	$(Build/gzip) && \
+	rm -rf $@.tmp
+endef
+
 define Device/seama
   KERNEL := kernel-bin | append-dtb | relocate-kernel | lzma
   KERNEL_INITRAMFS := $$(KERNEL) | seama
@@ -339,6 +381,25 @@ define Device/engenius_ecb1750
   IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata | check-size $$$$(IMAGE_SIZE)
 endef
 TARGET_DEVICES += engenius_ecb1750
+
+define Device/engenius_ens202ext
+  ATH_SOC := ar9341
+  DEVICE_TITLE := EnGenius ENS202EXT
+  DEVICE_PACKAGES := rssileds kmod-leds-gpio
+  IMAGE_SIZE := 12032k
+  KERNEL := kernel-bin | append-dtb | lzma | uImage lzma -M 0x4f4b4c49
+  LOADER_TYPE := bin
+  LOADER_FLASH_OFFS := 0x230000
+  COMPILE := loader-ens202ext.bin loader-ens202ext.uImage
+  COMPILE/loader-ens202ext.bin := loader-okli-compile
+  COMPILE/loader-ens202ext.uImage := append-loader-okli ens202ext | \
+	pad-to $$$$(BLOCKSIZE) | lzma | uImage lzma
+  IMAGES += factory.bin
+  IMAGE/factory.bin := append-squashfs-fakeroot-be | pad-to $$$$(BLOCKSIZE) | \
+	append-kernel | pad-to $$$$(BLOCKSIZE) | append-rootfs | pad-rootfs | \
+	check-size $$$$(IMAGE_SIZE) | engenius_ens202ext-factory
+endef
+TARGET_DEVICES += engenius_ens202ext
 
 define Device/engenius_epg5000
   ATH_SOC := qca9558
