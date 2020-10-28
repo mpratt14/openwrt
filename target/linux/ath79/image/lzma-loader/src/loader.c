@@ -71,6 +71,7 @@ static unsigned char *lzma_data;
 static unsigned long lzma_datasize;
 static unsigned long lzma_outsize;
 static unsigned long kernel_la;
+static unsigned long kernel_alt;
 
 #ifdef CONFIG_KERNEL_CMDLINE
 #define kernel_argc	2
@@ -179,24 +180,30 @@ static void lzma_init_data(void)
 
 	flash_base = (unsigned char *) KSEG1ADDR(AR71XX_FLASH_START);
 
-	printf("Looking for OpenWrt image... ");
+	if (kernel_alt != 0) {
+		printf("Using kernel at 0x%08x\n", flash_base + kernel_alt);
 
-	for (flash_ofs = CONFIG_FLASH_OFFS;
-	     flash_ofs <= (CONFIG_FLASH_OFFS + CONFIG_FLASH_MAX);
-	     flash_ofs += CONFIG_FLASH_STEP) {
+		flash_ofs = kernel_alt;
+	} else {
+		printf("Looking for OpenWrt image... ");
 
-		magic = get_be32(flash_base + flash_ofs);
-		if (magic == IH_MAGIC_OKLI) {
-			break;
+		for (flash_ofs = CONFIG_FLASH_OFFS;
+		     flash_ofs <= (CONFIG_FLASH_OFFS + CONFIG_FLASH_MAX);
+		     flash_ofs += CONFIG_FLASH_STEP) {
+
+			magic = get_be32(flash_base + flash_ofs);
+			if (magic == IH_MAGIC_OKLI) {
+				break;
+			}
 		}
-	}
 
-	if (magic != IH_MAGIC_OKLI) {
-		printf("not found!\n");
-		return;
-	}
+		if (magic != IH_MAGIC_OKLI) {
+			printf("not found!\n");
+			return;
+		}
 
-	printf("found at 0x%08x\n", flash_base + flash_ofs);
+		printf("found at 0x%08x\n", flash_base + flash_ofs);
+	}
 
 	hdr = (struct image_header *) (flash_base + flash_ofs);
 
@@ -256,7 +263,12 @@ void loader_main(unsigned long reg_a0, unsigned long reg_a1,
 
 	ret = kernel_load();
 	if (ret != 0) {
+#ifdef CONFIG_FLASH_ALT
+		kernel_alt = CONFIG_FLASH_ALT;
+		kernel_load();
+#else
 		halt();
+#endif
 	}
 
 	flush_cache(kernel_la, lzma_outsize);
